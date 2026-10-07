@@ -151,16 +151,15 @@ def CDATA(data):
 
 
 def checkIn(user, pwd, ip):
-    global hasE
+    global hasE, headers
+    headers.pop("Cookie", None)
 
-    # ✅ 每次新建 HTMLSession → 新 cookie
     session = HTMLSession()
     session.headers.update(headers)
     session.proxies = {
         "http": f"http://{ip}",
         "https": f"http://{ip}",
     }
-
     logger.info(f"{format_username(user)} 开始签到")
 
     try:
@@ -168,10 +167,11 @@ def checkIn(user, pwd, ip):
         base = session.get("https://bbs.binmt.cc/", timeout=20)
         base.encoding = base.apparent_encoding
         cookies = session.cookies.get_dict()
-        print(cookies)
+        headers["Cookie"] = cookies
+        session.headers.update(headers)
         
         # （可选）如果你发现 JS 还会补 cookie，可以 render
-        base.html.render(timeout=20, sleep=1)
+        # base.html.render(timeout=20, sleep=1)
 
         # 1. 获取登录浮层
         url = (
@@ -193,7 +193,11 @@ def checkIn(user, pwd, ip):
             logger.warning(f"{format_username(user)} 未获取到 formhash")
             session.close()
             return False
-
+        print(_loginhash)
+        print(_formhash)
+        print(resp.text)
+        return True
+        """
         # 2. 登录
         url = (
             "https://bbs.binmt.cc/member.php?mod=logging"
@@ -260,7 +264,7 @@ def checkIn(user, pwd, ip):
         logger.warning(f"{format_username(user)} 签到失败: {CDATA(text)}")
         session.close()
         return False
-
+        """
     except Exception as e:
         logger.warning(f"{format_username(user)} 异常: {e}")
         IP_LIST[ip] = False
