@@ -166,9 +166,6 @@ def checkIn(user, pwd, ip):
         # ★ 关键：先访问首页，让 Discuz 种基础 cookie
         base = session.get("https://bbs.binmt.cc/", timeout=20)
         base.encoding = base.apparent_encoding
-        cookies = session.cookies.get_dict()
-        headers["Cookie"] = cookies
-        session.headers.update(headers)
         
         # （可选）如果你发现 JS 还会补 cookie，可以 render
         # base.html.render(timeout=20, sleep=1)
