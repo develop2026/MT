@@ -1,3 +1,5 @@
-requests==2.32.5
+#requests==2.32.5
 sqlitedict==2.1.0
 pytz==2025.2
+requests-html==0.10.0
+lxml<5.0.0
