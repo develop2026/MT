@@ -153,7 +153,7 @@ def CDATA(data):
 def checkIn(user, pwd, ip):
     global hasE
 
-    # ✅ 每次新建 HTMLSession → 全新 cookie
+    # ✅ 每次新建 HTMLSession → 新 cookie
     session = HTMLSession()
     session.headers.update(headers)
     session.proxies = {
@@ -164,7 +164,14 @@ def checkIn(user, pwd, ip):
     logger.info(f"{format_username(user)} 开始签到")
 
     try:
-        # 1. 获取登录页
+        # ★ 关键：先访问首页，让 Discuz 种基础 cookie
+        base = session.get("https://bbs.binmt.cc/", timeout=20)
+        base.encoding = base.apparent_encoding
+
+        # （可选）如果你发现 JS 还会补 cookie，可以 render
+        # base.html.render(timeout=20, sleep=1)
+
+        # 1. 获取登录浮层
         url = (
             "https://bbs.binmt.cc/member.php?mod=logging"
             "&action=login&infloat=yes&handlekey=login"
@@ -193,7 +200,7 @@ def checkIn(user, pwd, ip):
         )
         data = {
             "formhash": _formhash,
-            "referer": "https://bbs.binmt.cc/k_misign-sign.html",
+            "referer": "https://bbs.binmt.cc/",
             "fastloginfield": "username",
             "username": user,
             "password": pwd,
@@ -212,7 +219,7 @@ def checkIn(user, pwd, ip):
             session.close()
             return False
 
-        # 3. 进入签到页
+        # 3. 签到页
         resp = session.get(
             "https://bbs.binmt.cc/k_misign-sign.html",
             timeout=20
