@@ -189,10 +189,11 @@ def checkIn(user, pwd, ip):
         if not _formhash:
             logger.warning(f"{format_username(user)} 未获取到 formhash")
             session.close()
+            print(_loginhash)
+            print(_formhash)
+            print(resp.text)
             return False
-        print(_loginhash)
-        print(_formhash)
-        print(resp.text)
+        
         return True
         """
         # 2. 登录
