@@ -7,7 +7,7 @@ MT论坛自动签到（浏览器版）
 - 原脚本的：函数签名、签到流程、正则解析、账号/代理逻辑全部保持不变
 - 依赖：pip install playwright && playwright install chromium
 """
-import os
+import os,requests
 import re
 import sys
 import time
@@ -170,26 +170,17 @@ class BrowserResponse:
 
 
 def verify(proxy):
-    """代理连通性检查：浏览器内请求一次，能连通即通过。"""
     target_url = 'https://bbs.binmt.cc/forum.php?mod=guide&view=hot'
+    proxies = {
+        'https': f'http://{proxy}',
+        'http': f'http://{proxy}'
+    }
     start_time = time.time()
-    session = None
     try:
-        session = BrowserSession(proxy=proxy)
-        # 直接拿最底层 response，判断真实 HTTP 状态
-        resp = session._page.context.request.get(
-            target_url,
-            headers={"User-Agent": headers["User-Agent"]},
-            timeout=15000,
-        )
-        # 只要能连通（2xx/3xx）即视为可用，不要求过 WAF、不看页面内容
-        passed = resp.status < 400
-        return proxy, passed, int((time.time() - start_time) * 1000)
-    except Exception:
+        response = requests.get(target_url, headers=headers, proxies=proxies, timeout=20)
+        return proxy, response.ok, int((time.time() - start_time) * 1000)
+    except:
         return proxy, False, -1
-    finally:
-        if session:
-            session.close()
 
 
 def is_phone_number(username):
