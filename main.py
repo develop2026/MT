@@ -13,6 +13,7 @@ def browser_checkin(user, pwd, proxy):
     target_url = "https://bbs.binmt.cc/forum.php?mod=guide&view=hot"
 
     with sync_playwright() as p:
+        logger.info("1")
         browser = p.chromium.launch(
             headless=True,
             args=[
@@ -21,49 +22,49 @@ def browser_checkin(user, pwd, proxy):
                 "--disable-blink-features=AutomationControlled"
             ]
         )
-
+        logger.info("2")
         context = browser.new_context(
             proxy={"server": proxy_url},
             user_agent=headers['User-Agent'],
             viewport={"width": 1280, "height": 800}
         )
-
+        logger.info("3")
         # 反爬：去除 webdriver 标记
         context.add_init_script("""
             Object.defineProperty(navigator, 'webdriver', {get: () => undefined})
         """)
-
+        logger.info("4")
         page = context.new_page()
-
+        logger.info("5")
         try:
             # 1. 先访问目标站，触发 WAF JS 校验
             page.goto(target_url, timeout=30000)
             page.wait_for_load_state("networkidle", timeout=30000)
-
+            logger.info("6")
             # 2. 登录页
             page.goto(
                 "https://bbs.binmt.cc/member.php?mod=logging&action=login",
                 timeout=30000
             )
-
+            logger.info("7")
             page.wait_for_selector("input[name='username']", timeout=15000)
             page.fill("input[name='username']", user)
             page.fill("input[name='password']", pwd)
-
+            logger.info("8")
             page.click("button[type='submit'], input[type='submit']")
             page.wait_for_load_state("networkidle", timeout=30000)
-
+            logger.info("9")
             # 3. 判断是否登录失败
             if "失败" in page.content():
                 return False, "密码错误"
-
+            logger.info("10")
             # 4. 进入签到页
             page.goto(
                 "https://bbs.binmt.cc/k_misign-sign.html",
                 timeout=30000
             )
             page.wait_for_load_state("networkidle", timeout=30000)
-
+            logger.info("11")
             # 5. 提取 formhash
             formhash = page.evaluate("""
                 () => {
