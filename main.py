@@ -75,6 +75,11 @@ def browser_checkin(user, pwd, proxy):
             page.fill("input[name='password']", "")
             page.type("input[name='password']", pwd, delay=100)
             
+            logger.info("DEBUG username value: %s", page.input_value("input[name='username']"))
+            logger.info("DEBUG password value: %s", page.input_value("input[name='password']"))
+            logger.info("DEBUG page has login form: %s", bool(page.query_selector("form")))
+            logger.info("DEBUG body snippet: %s", page.content()[:500])
+
             logger.info("[STEP 9] 账号密码已输入")
 
             # ✅ 关键修复：用 JS 强制提交（绕过 comiis JS 拦截）
