@@ -11,88 +11,173 @@ def browser_checkin(user, pwd, proxy):
     返回 (success: bool, msg: str)
     """
     proxy_url = f"http://{proxy}"
+    
+    # ✅ 不要用 mobile=2，用桌面版
+    login_url = "https://bbs.binmt.cc/member.php?mod=logging&action=login"
     target_url = "https://bbs.binmt.cc/forum.php?mod=guide&view=hot"
 
     with sync_playwright() as p:
-        logger.info("1")
+        logger.info("[STEP 1] 启动浏览器")
         browser = p.chromium.launch(
             headless=True,
             args=[
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
-                "--disable-blink-features=AutomationControlled"
+                "--disable-blink-features=AutomationControlled",
+                "--disable-dev-shm-usage"
             ]
         )
-        logger.info("2")
+
+        logger.info("[STEP 2] 创建上下文")
         context = browser.new_context(
             proxy={"server": proxy_url},
-            user_agent=headers['User-Agent'],
-            viewport={"width": 1280, "height": 800}
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 800},
+            locale="zh-CN",
+            timezone_id="Asia/Shanghai"
         )
-        logger.info("3")
+
         # 反爬：去除 webdriver 标记
         context.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {get: () => undefined})
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            window.chrome = {runtime: {}};
         """)
-        logger.info("4")
+
+        logger.info("[STEP 3] 创建页面")
         page = context.new_page()
-        logger.info("5")
+
         try:
             # 1. 先访问目标站，触发 WAF JS 校验
-            page.goto(target_url, timeout=30000)
-            page.wait_for_load_state("networkidle", timeout=30000)
-            logger.info("6")
-            # 2. 登录页
-            page.goto(
-                "https://bbs.binmt.cc/member.php?mod=logging&action=login&mobile=2",
-                timeout=30000
-            )
-            logger.info("7")
+            logger.info("[STEP 4] 访问热门页（触发WAF）")
+            page.goto(target_url, timeout=30000, wait_until="networkidle")
+            page.wait_for_timeout(3000)  # 等 WAF cookie 写入
+            logger.info("[STEP 5] WAF 校验完成")
+
+            # 2. 登录页（✅ 不用 mobile=2）
+            logger.info("[STEP 6] 进入登录页")
+            page.goto(login_url, timeout=30000, wait_until="networkidle")
+            page.wait_for_timeout(2000)
+
+            # 确认页面加载
+            logger.info(f"[STEP 7] 当前URL: {page.url}")
+            logger.info(f"[STEP 7] 页面标题: {page.title()}")
+
+            # 等待输入框
+            logger.info("[STEP 8] 等待用户名输入框")
             page.wait_for_selector("input[name='username']", timeout=15000)
-            page.fill("input[name='username']", user)
-            page.fill("input[name='password']", pwd)
-            logger.info("8")
             
-            btn = page.locator("button[name='submit']")
-            btn.scroll_into_view_if_needed()
-            btn.click(delay=200)
-            logger.info("81")
-            page.wait_for_load_state("networkidle", timeout=30000)
-            logger.info("9")
-            # 3. 判断是否登录失败
-            if "失败" in page.content():
-                return False, "密码错误"
-            logger.info("10")
-            # 4. 进入签到页
-            page.goto(
-                "https://bbs.binmt.cc/k_misign-sign.html",
-                timeout=30000
-            )
-            page.wait_for_load_state("networkidle", timeout=30000)
-            logger.info("11")
-            # 5. 提取 formhash
-            formhash = page.evaluate("""
+            # 清空再输入（防止有默认值）
+            page.click("input[name='username']")
+            page.fill("input[name='username']", "")
+            page.type("input[name='username']", user, delay=100)
+            
+            page.click("input[name='password']")
+            page.fill("input[name='password']", "")
+            page.type("input[name='password']", pwd, delay=100)
+            
+            logger.info("[STEP 9] 账号密码已输入")
+
+            # ✅ 关键修复：用 JS 强制提交（绕过 comiis JS 拦截）
+            logger.info("[STEP 10] 执行登录提交")
+            page.evaluate("""
                 () => {
-                    const input = document.querySelector('input[name="formhash"]');
-                    return input ? input.value : "";
+                    const form = document.querySelector('form');
+                    if (form) {
+                        // 先触发表单验证
+                        const btn = document.querySelector('button[name="submit"]');
+                        if (btn) btn.click();
+                    }
                 }
             """)
+            
+            # 等待跳转
+            logger.info("[STEP 11] 等待登录结果...")
+            page.wait_for_timeout(5000)
+            
+            current_url = page.url
+            content = page.content()
+            logger.info(f"[STEP 12] 登录后URL: {current_url}")
+            
+            # 判断是否登录失败
+            if "登录" in page.title() or "login" in current_url.lower():
+                if "失败" in content or "错误" in content or "密码" in content:
+                    logger.info("[STEP 13] 登录失败：密码错误")
+                    return False, "密码错误"
+                else:
+                    logger.info("[STEP 13] 登录失败：未知原因")
+                    # 截图调试
+                    page.screenshot(path="login_fail.png")
+                    return False, f"登录未成功，当前URL: {current_url}"
+            
+            logger.info("[STEP 14] 登录成功！")
+
+            # 4. 进入签到页
+            logger.info("[STEP 15] 进入签到页")
+            page.goto(
+                "https://bbs.binmt.cc/k_misign-sign.html",
+                timeout=30000,
+                wait_until="networkidle"
+            )
+            page.wait_for_timeout(3000)
+            logger.info(f"[STEP 16] 签到页URL: {page.url}")
+
+            # 检查是否需要登录
+            if "需要先登录" in page.content():
+                logger.info("[STEP 17] Cookie未保持，尝试从页面提取formhash")
+                # 尝试从其他页面获取
+                page.goto("https://bbs.binmt.cc/forum.php", timeout=30000, wait_until="networkidle")
+                page.wait_for_timeout(2000)
+
+            # 5. 提取 formhash
+            logger.info("[STEP 18] 提取 formhash")
+            formhash = page.evaluate("""
+                () => {
+                    // 方法1：input
+                    let input = document.querySelector('input[name="formhash"]');
+                    if (input) return input.value;
+                    // 方法2：meta
+                    let meta = document.querySelector('meta[name="formhash"]');
+                    if (meta) return meta.content;
+                    // 方法3：从HTML文本中正则提取
+                    let match = document.body.innerHTML.match(/formhash[=:]['"]([^'"]+)['"]/);
+                    if (match) return match[1];
+                    return "";
+                }
+            """)
+            
+            logger.info(f"[STEP 19] formhash: {formhash}")
 
             if not formhash:
-                return False, "未获取到 formhash"
+                # 尝试从 cookie 或页面源码中找
+                page.screenshot(path="no_formhash.png")
+                return False, "未获取到 formhash，已截图"
 
-            # 6. 执行签到请求（仍用浏览器上下文，带 cookie）
+            # 6. 执行签到请求（用浏览器上下文的 cookie）
+            logger.info("[STEP 20] 执行签到")
             sign_resp = page.request.get(
-                f"https://bbs.binmt.cc/plugin.php?id=k_misign:sign&operation=qiandao&format=text&formhash={formhash}"
+                f"https://bbs.binmt.cc/plugin.php?id=k_misign:sign&operation=qiandao&format=text&formhash={formhash}",
+                headers={
+                    "Referer": "https://bbs.binmt.cc/k_misign-sign.html",
+                    "X-Requested-With": "XMLHttpRequest"
+                }
             )
 
             text = sign_resp.text()
+            logger.info(f"[STEP 21] 签到返回: {text[:200]}")
 
-            if "已签" in text:
+            if "已签" in text or "成功" in text or "签到" in text:
+                logger.info("[STEP 22] 签到成功！")
                 return True, text
+            
+            logger.info(f"[STEP 22] 签到返回未知内容: {text[:100]}")
             return False, text
 
         except Exception as e:
+            logger.error(f"[ERROR] 异常: {str(e)}")
+            try:
+                page.screenshot(path="error.png")
+            except:
+                pass
             return False, str(e)
         finally:
             browser.close()
