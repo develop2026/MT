@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from preferences import prefs
 from logger import logger
 from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect
 
 def browser_checkin(user, pwd, proxy):
     """
@@ -43,7 +44,7 @@ def browser_checkin(user, pwd, proxy):
             logger.info("6")
             # 2. 登录页
             page.goto(
-                "https://bbs.binmt.cc/member.php?mod=logging&action=login",
+                "https://bbs.binmt.cc/member.php?mod=logging&action=login&mobile=2",
                 timeout=30000
             )
             logger.info("7")
@@ -51,7 +52,11 @@ def browser_checkin(user, pwd, proxy):
             page.fill("input[name='username']", user)
             page.fill("input[name='password']", pwd)
             logger.info("8")
-            page.click("button[type='submit']")
+            
+            btn = page.locator("button[name='submit']")
+            btn.scroll_into_view_if_needed()
+            btn.click(delay=200)
+            logger.info("81")
             page.wait_for_load_state("networkidle", timeout=30000)
             logger.info("9")
             # 3. 判断是否登录失败
