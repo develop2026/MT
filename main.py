@@ -51,7 +51,7 @@ def browser_checkin(user, pwd, proxy):
             page.fill("input[name='username']", user)
             page.fill("input[name='password']", pwd)
             logger.info("8")
-            page.click("button[type='submit'], input[type='submit']")
+            page.click("button[type='submit']")
             page.wait_for_load_state("networkidle", timeout=30000)
             logger.info("9")
             # 3. 判断是否登录失败
