@@ -100,7 +100,7 @@ def browser_checkin(user, pwd, proxy):
             
             # 判断是否登录失败
             if "登录" in page.title() or "login" in current_url.lower():
-                if "失败" in content or "错误" in content or "密码" in content:
+                if "登录失败" in content or "错误" in content:
                     logger.info("[STEP 13] 登录失败：密码错误")
                     return False, "密码错误"
                 else:
