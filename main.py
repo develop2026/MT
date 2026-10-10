@@ -1,29 +1,95 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-MT论坛自动签到（浏览器版）
-=========================
-- 仅将底层 requests 替换为 Playwright 浏览器，用于通过阿里云 WAF JS 挑战
-- 原脚本的：函数签名、签到流程、正则解析、账号/代理逻辑全部保持不变
-- 依赖：pip install playwright && playwright install chromium
-"""
-import os,requests
-import re
-import sys
-import time
-import random
-import ipaddress
-
-try:
-    from playwright.sync_api import sync_playwright
-except ImportError:
-    print("缺少 playwright，请执行：pip install playwright && playwright install chromium", file=sys.stderr)
-    sys.exit(1)
-
-# ---------- 以下为原脚本内容，除 requests 调用外保持不变 ----------
-
+import json, requests, re, os, time, random, ipaddress
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from preferences import prefs
 from logger import logger
+from playwright.sync_api import sync_playwright
+
+def browser_checkin(user, pwd, proxy):
+    """
+    使用无头浏览器完成登录 + 签到
+    返回 (success: bool, msg: str)
+    """
+    proxy_url = f"http://{proxy}"
+    target_url = "https://bbs.binmt.cc/forum.php?mod=guide&view=hot"
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-blink-features=AutomationControlled"
+            ]
+        )
+
+        context = browser.new_context(
+            proxy={"server": proxy_url},
+            user_agent=headers['User-Agent'],
+            viewport={"width": 1280, "height": 800}
+        )
+
+        # 反爬：去除 webdriver 标记
+        context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined})
+        """)
+
+        page = context.new_page()
+
+        try:
+            # 1. 先访问目标站，触发 WAF JS 校验
+            page.goto(target_url, timeout=30000)
+            page.wait_for_load_state("networkidle", timeout=30000)
+
+            # 2. 登录页
+            page.goto(
+                "https://bbs.binmt.cc/member.php?mod=logging&action=login",
+                timeout=30000
+            )
+
+            page.wait_for_selector("input[name='username']", timeout=15000)
+            page.fill("input[name='username']", user)
+            page.fill("input[name='password']", pwd)
+
+            page.click("button[type='submit'], input[type='submit']")
+            page.wait_for_load_state("networkidle", timeout=30000)
+
+            # 3. 判断是否登录失败
+            if "失败" in page.content():
+                return False, "密码错误"
+
+            # 4. 进入签到页
+            page.goto(
+                "https://bbs.binmt.cc/k_misign-sign.html",
+                timeout=30000
+            )
+            page.wait_for_load_state("networkidle", timeout=30000)
+
+            # 5. 提取 formhash
+            formhash = page.evaluate("""
+                () => {
+                    const input = document.querySelector('input[name="formhash"]');
+                    return input ? input.value : "";
+                }
+            """)
+
+            if not formhash:
+                return False, "未获取到 formhash"
+
+            # 6. 执行签到请求（仍用浏览器上下文，带 cookie）
+            sign_resp = page.request.get(
+                f"https://bbs.binmt.cc/plugin.php?id=k_misign:sign&operation=qiandao&format=text&formhash={formhash}"
+            )
+
+            text = sign_resp.text()
+
+            if "已签" in text:
+                return True, text
+            return False, text
+
+        except Exception as e:
+            return False, str(e)
+        finally:
+            browser.close()
 
 IP_LIST = {}
 accounts_list = {}
@@ -35,7 +101,6 @@ headers = {
     'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
     'Connection': 'keep-alive'
 }
-
 
 def validate_ip_port(ip, port):
     try:
@@ -52,123 +117,6 @@ def validate_ip_port(ip, port):
         return False
     return True
 
-
-class BrowserSession:
-    """替代 requests.Session，用浏览器执行请求以通过 WAF JS 挑战。"""
-
-    def __init__(self, proxy=None):
-        self._pw = sync_playwright().start()
-        launch_args = ["--disable-blink-features=AutomationControlled", "--no-sandbox"]
-        self._browser = self._pw.chromium.launch(headless=True, args=launch_args)
-        ctx_kwargs = {
-            "user_agent": headers["User-Agent"],
-            "viewport": {"width": 1280, "height": 800},
-            "extra_http_headers": {k: v for k, v in headers.items() if k != "User-Agent"},
-        }
-        if proxy:
-            ctx_kwargs["proxy"] = {"server": f"http://{proxy}"}
-        self._ctx = self._browser.new_context(**ctx_kwargs)
-        self._ctx.add_init_script(
-            "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
-        )
-        self._page = self._ctx.new_page()
-
-    def _goto(self, url, timeout=30000):
-        # 让浏览器执行 WAF 前端 JS 挑战
-        resp = self._page.goto(url, wait_until="domcontentloaded", timeout=timeout)
-        # 给 WAF 验证与跳转留一点时间
-        self._page.wait_for_timeout(2500)
-        return resp
-
-    def get(self, url, proxies=None, timeout=20, **_kw):
-        self._goto(url, timeout=timeout * 1000)
-        return BrowserResponse(self._page)
-
-    def post(self, url, data=None, proxies=None, timeout=20, **_kw):
-        # 先加载表单所在页面
-        self._goto(url, timeout=timeout * 1000)
-        # 自动填充常见表单字段并提交
-        if isinstance(data, dict):
-            for name, val in data.items():
-                try:
-                    el = self._page.query_selector(f'input[name="{name}"]')
-                    if el and val not in (None, ""):
-                        el.fill(str(val))
-                except Exception:
-                    pass
-        try:
-            btn = self._page.query_selector('input[name="loginsubmit"],button[name="loginsubmit"]')
-            if btn:
-                btn.click()
-            else:
-                self._page.keyboard.press("Enter")
-        except Exception:
-            self._page.keyboard.press("Enter")
-        self._page.wait_for_load_state("domcontentloaded", timeout=timeout * 1000)
-        self._page.wait_for_timeout(1500)
-        return BrowserResponse(self._page)
-
-    def close(self):
-        try:
-            self._ctx.close()
-        except Exception:
-            pass
-        try:
-            self._browser.close()
-        except Exception:
-            pass
-        try:
-            self._pw.stop()
-        except Exception:
-            pass
-
-
-class BrowserResponse:
-    """模拟 requests.Response，保留原脚本用到的属性与方法。"""
-
-    def __init__(self, page):
-        self._page = page
-        self.url = page.url
-        self.status_code = 200
-        try:
-            self._resp = page.context.pages and page
-        except Exception:
-            self._resp = None
-        # 尝试读取底层 response 状态
-        try:
-            # page.goto 返回值为最后一次 navigation response
-            pass
-        except Exception:
-            pass
-
-    @property
-    def ok(self):
-        # 能正常取到内容即视为通过 WAF
-        try:
-            return self._page.title() is not None
-        except Exception:
-            return False
-
-    @property
-    def text(self):
-        return self._page.content()
-
-    @property
-    def apparent_encoding(self):
-        return "utf-8"
-
-    @property
-    def encoding(self):
-        return "utf-8"
-
-    @encoding.setter
-    def encoding(self, val):
-        pass
-
-    def raise_for_status(self):
-        pass
-
-
 def verify(proxy):
     target_url = 'https://bbs.binmt.cc/forum.php?mod=guide&view=hot'
     proxies = {
@@ -182,17 +130,14 @@ def verify(proxy):
     except:
         return proxy, False, -1
 
-
 def is_phone_number(username):
     pattern = r'^1[3-9]\d{9}$'
     return re.match(pattern, username) is not None
-
 
 def format_phone_number(phone):
     if len(phone) == 11:
         return f"{phone[:3]}****{phone[-4:]}"
     return phone
-
 
 def format_username(username):
     if is_phone_number(username):
@@ -200,13 +145,12 @@ def format_username(username):
     n = len(username)
     if n <= 2:
         return username
-    hide_rules = {3: 1, 4: 2, 5: 3, 6: 2, 7: 3, 8: 4, 9: 3, 10: 4}
+    hide_rules = {3:1,4:2,5:3,6:2,7:3,8:4,9:3,10:4}
     hide = hide_rules.get(n, 4)
     keep = n - hide
     left = keep // 2
     right = keep - left
     return username[:left] + '*' * hide + username[-right:]
-
 
 def load():
     myset = set()
@@ -215,74 +159,47 @@ def load():
         with open("src/ips.txt", "r", encoding="utf-8") as f:
             for line in f:
                 ip = line.strip()
-                if ":" not in ip or not ip:
-                    continue
+                if ":" not in ip or not ip: continue
                 newIp, newPort = ip.split(':', 1)
-                if not validate_ip_port(newIp, newPort):
-                    continue
+                if not validate_ip_port(newIp, newPort): continue
                 myset.add(ip)
     except Exception as e:
         pass
-    for proxy in myset:
-        proxy, is_valid, requestTime = verify(proxy)
-        if is_valid:
-            successful_proxies.append((proxy, requestTime))
+    with ThreadPoolExecutor(max_workers=30) as executor:
+        futures = [executor.submit(verify, proxy) for proxy in myset]
+        for future in as_completed(futures):
+            proxy, is_valid, requestTime = future.result()
+            if is_valid:
+                successful_proxies.append((proxy, requestTime))
     successful_proxies.sort(key=lambda x: x[1])
     logger.info("可用ip代理:")
     for index, (proxy, req_time) in enumerate(successful_proxies, 1):
         logger.info(f"{index}: {proxy} - {req_time}ms")
         IP_LIST[proxy] = True
 
-
 def checkIn(user, pwd, ip):
     global hasE
-    req = BrowserSession(proxy=ip)
     logger.info(f"{format_username(user)} 开始签到")
     try:
-        url = 'https://bbs.binmt.cc/member.php?mod=logging&action=login&infloat=yes&handlekey=login&inajax=1&ajaxtarget=fwin_content_login'
-        resp = req.get(url, timeout=20)
-        if resp.ok:
-            content = resp.text
-            _loginhash = loginhash(content)
-            _formhash = formhash(content)
-            url = f'https://bbs.binmt.cc/member.php?mod=logging&action=login&loginsubmit=yes&handlekey=login&loginhash={_loginhash}&inajax=1'
-            data = {
-                'formhash': _formhash,
-                'referer': 'https://bbs.binmt.cc/k_misign-sign.html',
-                'fastloginfield': 'username',
-                'username': user,
-                'password': pwd,
-                'questionid': '0',
-                'answer': '',
-                'agreebbrule': ''
-            }
-            resp = req.post(url, data=data, timeout=20)
-            if resp.ok:
-                if '失败' in resp.text:
-                    del accounts_list[user]
-                    logger.warning(f"{format_username(user)}: 密码错误")
-                    hasE = True
-                    return
-                url = 'https://bbs.binmt.cc/k_misign-sign.html'
-                resp = req.get(url, timeout=20)
-                _formhash = formhash(resp.text)
-                code = resp.status_code
-                if resp.ok:
-                    url = f'https://bbs.binmt.cc/plugin.php?id=k_misign:sign&operation=qiandao&format=text&formhash={_formhash}'
-                    resp = req.get(url, timeout=20)
-                    if '已签' in resp.text:
-                        del accounts_list[user]
-                        logger.info(CDATA(resp.text))
-                        prefs.put(user, prefs.getTime())
-                        return True
-                    logger.warning(CDATA(resp.text))
+        success, msg = browser_checkin(user, pwd, ip)
+        if success:
+            logger.info(CDATA(msg))
+            prefs.put(user, prefs.getTime())
+            return True
+
+        if "密码错误" in msg:
+            del accounts_list[user]
+            logger.warning(f"{format_username(user)}: 密码错误")
+            hasE = True
+            return False
+
+        logger.warning(CDATA(msg))
+        return False
+
     except Exception as e:
         logger.warning(f"异常: {str(e)}")
         IP_LIST[ip] = False
-    finally:
-        req.close()
-    return False
-
+        return False
 
 def loginhash(data):
     pattern = r'loginhash.*?=(.*?)[\'"]>'
@@ -291,7 +208,6 @@ def loginhash(data):
         return match.group(1).strip()
     return ''
 
-
 def formhash(data):
     pattern = r'formhash[\'"].*?value=[\'"](.*?)[\'"].*?/>'
     match = re.search(pattern, data, re.IGNORECASE | re.UNICODE)
@@ -299,14 +215,12 @@ def formhash(data):
         return match.group(1).strip()
     return ''
 
-
 def CDATA(data):
-    pattern = r'CDATA.*?(.*?)\]\]>'
+    pattern = r'CDATA.*?(.*?)]>'
     match = re.search(pattern, data, re.IGNORECASE | re.UNICODE)
     if match and match.group(1):
         return match.group(1).strip('[]')
     return ''
-
 
 def start():
     ACCOUNTS = os.environ.get("ACCOUNTS", "")
@@ -331,18 +245,13 @@ def start():
         total = len(keys)
         for i, username in enumerate(keys):
             for proxy, status in IP_LIST.items():
-                if not status:
-                    continue
+                if not status: continue
                 try:
-                    if checkIn(username, accounts_list[username], proxy):
-                        break
-                except Exception:
+                    if checkIn(username, accounts_list[username], proxy): break
+                except:
                     pass
             if i < total - 1:
                 time.sleep(3)
-
-
 start()
 prefs.save()
-if hasE:
-    exit(1)
+if hasE: exit(1)
