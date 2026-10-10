@@ -170,16 +170,20 @@ class BrowserResponse:
 
 
 def verify(proxy):
-    """用浏览器真实打开目标页，判断是否通过 WAF。"""
+    """代理连通性检查：浏览器内请求一次，能连通即通过。"""
     target_url = 'https://bbs.binmt.cc/forum.php?mod=guide&view=hot'
     start_time = time.time()
     session = None
     try:
         session = BrowserSession(proxy=proxy)
-        resp = session.get(target_url, timeout=20)
-        # 检查是否真的拿到论坛内容（而不是 WAF 拦截页）
-        text = resp.text
-        passed = resp.ok and ("论坛" in text or "binmt" in text.lower() or "guide" in text.lower())
+        # 直接拿最底层 response，判断真实 HTTP 状态
+        resp = session._page.context.request.get(
+            target_url,
+            headers={"User-Agent": headers["User-Agent"]},
+            timeout=15000,
+        )
+        # 只要能连通（2xx/3xx）即视为可用，不要求过 WAF、不看页面内容
+        passed = resp.status < 400
         return proxy, passed, int((time.time() - start_time) * 1000)
     except Exception:
         return proxy, False, -1
