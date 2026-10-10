@@ -101,15 +101,15 @@ def browser_checkin(user, pwd, proxy):
             
             # 判断是否登录失败
             if "登录" in page.title() or "login" in current_url.lower():
-                if "登录失败" in content or "错误" in content:
+                if "登录失败" in content:
                     logger.info("[STEP 13] 登录失败：密码错误")
                     logger.info("DEBUG body snippet: %s", page.content())
                     return False, "密码错误"
-                else:
-                    logger.info("[STEP 13] 登录失败：未知原因")
-                    # 截图调试
-                    page.screenshot(path="login_fail.png")
-                    return False, f"登录未成功，当前URL: {current_url}"
+                # else:
+                    # logger.info("[STEP 13] 登录失败：未知原因")
+                    # # 截图调试
+                    # page.screenshot(path="login_fail.png")
+                    # return False, f"登录未成功，当前URL: {current_url}"
             
             logger.info("[STEP 14] 登录成功！")
 
@@ -125,55 +125,48 @@ def browser_checkin(user, pwd, proxy):
 
             # 检查是否需要登录
             if "需要先登录" in page.content():
-                logger.info("[STEP 17] Cookie未保持，尝试从页面提取formhash")
-                # 尝试从其他页面获取
-                page.goto("https://bbs.binmt.cc/forum.php", timeout=30000, wait_until="networkidle")
+                logger.info("[STEP 17] Cookie未保持，登录态失效")
+                return False, "登录态未保持，签到页要求先登录"
+
+            # 5. 点击签到按钮（你给的那个）
+            logger.info("[STEP 18] 点击签到按钮")
+            try:
+                # 方法1：直接点 #signresult
+                sign_btn = page.locator("#signresult")
+                if sign_btn.count() > 0:
+                    sign_btn.click()
+                    logger.info("[STEP 19] 已点击 #signresult 按钮")
+                else:
+                    # 方法2：兜底，直接执行 onclick 里的 JS
+                    logger.info("[STEP 19] 未找到按钮，直接执行 ajaxsign()")
+                    page.evaluate("ajaxsign();")
+            except Exception as e:
+                logger.info(f"[STEP 19] 点击异常，尝试直接执行 JS: {e}")
+                page.evaluate("ajaxsign();")
+
+            # 等签到完成 + 页面刷新（onclick 里有 window.location.reload()）
+            page.wait_for_timeout(5000)
+
+            # 6. 判断签到结果
+            logger.info("[STEP 20] 检查签到结果")
+            final_content = page.content()
+            final_url = page.url
+            logger.info(f"[STEP 20] 最终URL: {final_url}")
+
+            if "已签" in final_content:
+                logger.info("[STEP 21] 签到成功！")
+                return True, "签到成功"
+
+            # 如果页面刷新后还能看到签到按钮，说明没成功
+            if page.locator("#signresult").count() > 0:
+                logger.info("[STEP 21] 签到按钮仍存在，可能已签或失败")
+                # 再给一次机会判断
                 page.wait_for_timeout(2000)
+                if "已签" in page.content():
+                    return True, "签到成功（延迟确认）"
 
-            # 5. 提取 formhash
-            logger.info("[STEP 18] 提取 formhash")
-            formhash = page.evaluate("""
-                () => {
-                    // 方法1：input
-                    let input = document.querySelector('input[name="formhash"]');
-                    if (input) return input.value;
-                    // 方法2：meta
-                    let meta = document.querySelector('meta[name="formhash"]');
-                    if (meta) return meta.content;
-                    // 方法3：从HTML文本中正则提取
-                    let match = document.body.innerHTML.match(/formhash[=:]['"]([^'"]+)['"]/);
-                    if (match) return match[1];
-                    return "";
-                }
-            """)
-            
-            logger.info(f"[STEP 19] formhash: {formhash}")
-
-            if not formhash:
-                # 尝试从 cookie 或页面源码中找
-                page.screenshot(path="no_formhash.png")
-                return False, "未获取到 formhash，已截图"
-
-            # 6. 执行签到请求（用浏览器上下文的 cookie）
-            logger.info("[STEP 20] 执行签到")
-            sign_resp = page.request.get(
-                f"https://bbs.binmt.cc/plugin.php?id=k_misign:sign&operation=qiandao&format=text&formhash={formhash}",
-                headers={
-                    "Referer": "https://bbs.binmt.cc/k_misign-sign.html",
-                    "X-Requested-With": "XMLHttpRequest"
-                }
-            )
-
-            text = sign_resp.text()
-            logger.info(f"[STEP 21] 签到返回: {text[:200]}")
-
-            if "已签" in text or "成功" in text or "签到" in text:
-                logger.info("[STEP 22] 签到成功！")
-                return True, text
-            
-            logger.info(f"[STEP 22] 签到返回未知内容: {text[:100]}")
-            return False, text
-
+            logger.info(f"[STEP 21] 签到结果未知，页面片段: {final_content[:200]}")
+            return False, final_content[:200]
         except Exception as e:
             logger.error(f"[ERROR] 异常: {str(e)}")
             try:
