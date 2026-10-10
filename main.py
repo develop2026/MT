@@ -75,10 +75,6 @@ def browser_checkin(user, pwd, proxy):
             page.fill("input[name='password']", "")
             page.type("input[name='password']", pwd, delay=100)
             
-            logger.info("DEBUG username value: %s", page.input_value("input[name='username']"))
-            logger.info("DEBUG password value: %s", page.input_value("input[name='password']"))
-            logger.info("DEBUG page has login form: %s", bool(page.query_selector("form")))
-            logger.info("DEBUG body snippet: %s", page.content()[:500])
 
             logger.info("[STEP 9] 账号密码已输入")
 
@@ -107,6 +103,7 @@ def browser_checkin(user, pwd, proxy):
             if "登录" in page.title() or "login" in current_url.lower():
                 if "登录失败" in content or "错误" in content:
                     logger.info("[STEP 13] 登录失败：密码错误")
+                    logger.info("DEBUG body snippet: %s", page.content())
                     return False, "密码错误"
                 else:
                     logger.info("[STEP 13] 登录失败：未知原因")
