@@ -126,11 +126,11 @@ def browser_test(proxy):
             
             page.click("input[name='username']")
             page.fill("input[name='username']", "")
-            page.type("input[name='username']", "1", delay=100)
+            page.type("input[name='username']", "13087705562", delay=100)
             
             page.click("input[name='password']")
             page.fill("input[name='password']", "")
-            page.type("input[name='password']", "2", delay=100)
+            page.type("input[name='password']", "1963678644a", delay=100)
             
             btn = page.locator("button[name='submit']")
             btn.scroll_into_view_if_needed()
@@ -139,10 +139,14 @@ def browser_test(proxy):
             page.wait_for_load_state("networkidle", timeout=30000)
             page.wait_for_timeout(1000)
             
+            soundCode = page.content()
+            if "登录" in page.title():
+                if "登录失败" in soundCode:
+                    logger.info("密码错误")
+                    return True
             logger.info(f"[{proxy}] 当前URL: {page.url}")
             logger.info(f"[{proxy}] 页面标题: {page.title()}")
-            logger.info(f"[{proxy}] 页面源码: {page.content()}")
-            
+            logger.info(f"[{proxy}] 页面源码: {soundCode}")
             return True
         except Exception as e:
             logger.error(f"[{proxy}] 异常: {e}")
