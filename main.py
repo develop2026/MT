@@ -116,9 +116,9 @@ def browser_test(proxy):
         try:
             logger.info(f"[{proxy}] 访问登录页")
             page.goto(login_url, timeout=30000, wait_until="networkidle")
-            page.wait_for_timeout(2000)
+            page.wait_for_timeout(3000)
 
-            page.wait_for_selector("input[name='username']", timeout=10000)
+            page.wait_for_selector("input[name='username']", timeout=30000)
             
             page.click("input[name='username']")
             page.fill("input[name='username']", "")
@@ -132,8 +132,8 @@ def browser_test(proxy):
             btn.scroll_into_view_if_needed()
             btn.click(delay=200)
             
-            page.wait_for_load_state("networkidle", timeout=10000)
-            page.wait_for_timeout(2000)
+            page.wait_for_load_state("networkidle", timeout=30000)
+            page.wait_for_timeout(3000)
             
             soundCode = page.content()
             if "登录" in page.title():
@@ -141,10 +141,10 @@ def browser_test(proxy):
                     logger.info("密码错误")
                     return True
             page.goto("https://bbs.binmt.cc/k_misign-sign.html", timeout=30000, wait_until="networkidle")
-            sign_btn = page.wait_for_selector("#signresult", timeout=10000, state="visible")
+            sign_btn = page.wait_for_selector("#signresult", timeout=30000, state="visible")
             sign_btn.click()
-            page.wait_for_load_state("networkidle", timeout=10000)
-            page.wait_for_timeout(2000)
+            page.wait_for_load_state("networkidle", timeout=30000)
+            page.wait_for_timeout(3000)
             
             soundCode = page.content()
             logger.info(f"[{proxy}] 当前URL: {page.url}")
