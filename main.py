@@ -137,16 +137,24 @@ def browser_test(proxy):
             btn.click(delay=200)
             
             page.wait_for_load_state("networkidle", timeout=30000)
-            page.wait_for_timeout(1000)
+            page.wait_for_timeout(3000)
             
             soundCode = page.content()
             if "登录" in page.title():
                 if "登录失败" in soundCode:
                     logger.info("密码错误")
                     return True
+            page.goto(
+                "https://bbs.binmt.cc/k_misign-sign.html",
+                timeout=30000,
+                wait_until="networkidle"
+            )
+            page.wait_for_timeout(3000)
+            soundCode = page.content()
             logger.info(f"[{proxy}] 当前URL: {page.url}")
             logger.info(f"[{proxy}] 页面标题: {page.title()}")
             logger.info(f"[{proxy}] 页面源码: {soundCode}")
+            
             return True
         except Exception as e:
             logger.error(f"[{proxy}] 异常: {e}")
