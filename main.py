@@ -6,7 +6,7 @@ import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from logger import logger
 from playwright.sync_api import sync_playwright
-
+from playwright.sync_api import expect
 
 # ========= 全局 =========
 IP_LIST = {}
@@ -117,12 +117,32 @@ def browser_test(proxy):
         try:
             logger.info(f"[{proxy}] 访问登录页")
             page.goto(login_url, timeout=30000, wait_until="networkidle")
-            page.wait_for_timeout(3000)
+            page.wait_for_timeout(1000)
 
             logger.info(f"[{proxy}] 当前URL: {page.url}")
             logger.info(f"[{proxy}] 页面标题: {page.title()}")
+            # logger.info(f"[{proxy}] 页面源码: {page.content()}")
+            page.wait_for_selector("input[name='username']", timeout=15000)
+            
+            page.click("input[name='username']")
+            page.fill("input[name='username']", "")
+            page.type("input[name='username']", "1", delay=100)
+            
+            page.click("input[name='password']")
+            page.fill("input[name='password']", "")
+            page.type("input[name='password']", "2", delay=100)
+            
+            btn = page.locator("button[name='submit']")
+            btn.scroll_into_view_if_needed()
+            btn.click(delay=200)
+            
+            page.wait_for_load_state("networkidle", timeout=30000)
+            page.wait_for_timeout(1000)
+            
+            logger.info(f"[{proxy}] 当前URL: {page.url}")
+            logger.info(f"[{proxy}] 页面标题: {page.title()}")
             logger.info(f"[{proxy}] 页面源码: {page.content()}")
-
+            
             return True
         except Exception as e:
             logger.error(f"[{proxy}] 异常: {e}")
