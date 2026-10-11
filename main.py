@@ -85,7 +85,7 @@ def browser_test(proxy):
     login_url = "https://bbs.binmt.cc/member.php?mod=logging&action=login"
 
     with sync_playwright() as p:
-        logger.info("启动手机模式浏览器")
+        logger.info("启动浏览器")
         browser = p.chromium.launch(
             headless=True,
             args=[
@@ -95,7 +95,6 @@ def browser_test(proxy):
             ]
         )
 
-        # ✅ 手机模式
         context = browser.new_context(
             proxy={"server": proxy_url},
             user_agent="Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
@@ -116,12 +115,9 @@ def browser_test(proxy):
 
         try:
             logger.info(f"[{proxy}] 访问登录页")
-            page.goto(login_url, timeout=30000, wait_until="networkidle")
-            page.wait_for_timeout(1000)
+            page.goto(login_url, timeout=15000, wait_until="networkidle")
+            page.wait_for_timeout(2000)
 
-            logger.info(f"[{proxy}] 当前URL: {page.url}")
-            logger.info(f"[{proxy}] 页面标题: {page.title()}")
-            # logger.info(f"[{proxy}] 页面源码: {page.content()}")
             page.wait_for_selector("input[name='username']", timeout=15000)
             
             page.click("input[name='username']")
@@ -136,20 +132,20 @@ def browser_test(proxy):
             btn.scroll_into_view_if_needed()
             btn.click(delay=200)
             
-            page.wait_for_load_state("networkidle", timeout=30000)
-            page.wait_for_timeout(3000)
+            page.wait_for_load_state("networkidle", timeout=15000)
+            page.wait_for_timeout(2000)
             
             soundCode = page.content()
             if "登录" in page.title():
                 if "登录失败" in soundCode:
                     logger.info("密码错误")
                     return True
-            page.goto(
-                "https://bbs.binmt.cc/k_misign-sign.html",
-                timeout=30000,
-                wait_until="networkidle"
-            )
-            page.wait_for_timeout(3000)
+            page.goto("https://bbs.binmt.cc/k_misign-sign.html", timeout=15000, wait_until="networkidle")
+            sign_btn = page.wait_for_selector("#signresult", timeout=15000, state="visible")
+            sign_btn.click()
+            page.wait_for_load_state("networkidle", timeout=15000)
+            page.wait_for_timeout(2000)
+            
             soundCode = page.content()
             logger.info(f"[{proxy}] 当前URL: {page.url}")
             logger.info(f"[{proxy}] 页面标题: {page.title()}")
