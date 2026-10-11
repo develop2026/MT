@@ -121,10 +121,8 @@ def browser_test(proxy):
 
             logger.info(f"[{proxy}] 当前URL: {page.url}")
             logger.info(f"[{proxy}] 页面标题: {page.title()}")
+            logger.info(f"[{proxy}] 页面源码: {page.content()}")
 
-            # 截图方便调试
-            page.screenshot(path=f"login_{proxy.replace(':', '_')}.png")
-            logger.info("截图完成")
             return True
         except Exception as e:
             logger.error(f"[{proxy}] 异常: {e}")
