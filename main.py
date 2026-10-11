@@ -125,9 +125,10 @@ def browser_test(proxy):
             # 截图方便调试
             page.screenshot(path=f"login_{proxy.replace(':', '_')}.png")
             logger.info("截图完成")
-
+            return True
         except Exception as e:
             logger.error(f"[{proxy}] 异常: {e}")
+            return False
         finally:
             browser.close()
 
@@ -139,9 +140,10 @@ def start():
         logger.warning("没有可用代理")
         return
 
-    for proxy in IP_LIST.keys():
+    for proxy, status in IP_LIST.items():
+        if not status: continue
         try:
-            browser_test(proxy)
+            if browser_test(proxy): break
         except Exception as e:
             logger.error(f"{proxy} 测试失败: {e}")
 
